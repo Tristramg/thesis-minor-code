@@ -3,7 +3,6 @@
 open Printf
 open Graph
 
-
 let _ = Random.self_init ()
 
 let nb_dimension = 2
