@@ -1,11 +1,17 @@
 (* Martin's algorithm to calculate multiobjective shortest path *)
 
+(* Requires ocamlgraph 
+ * Compile with:
+     * ocamlopt graph.cmxa graphics.cmxa martins.ml
+     *)
+
 open Printf
 open Graph
 
 let _ = Random.self_init ()
 
 let nb_dimension = 2
+
 (* We define the graph we want to use *)
 (* The vertices have a list of array as labels *)
 module VertexLabel = struct 
@@ -17,7 +23,6 @@ module EdgeLabel = struct
     let compare = compare
     let default = Array.make nb_dimension 0.
 end
-
 
 module G = Imperative.Digraph.AbstractLabeled(VertexLabel)(EdgeLabel)
 (* The graph is a grid *)
@@ -63,16 +68,7 @@ let rec domination_filter label = function
             if (h < label) then h::(domination_filter label t)
             else domination_filter label t
 
-let p_label l = 
-    printf "[";
-    Array.iter (fun e -> printf "%f, " e) l;
-    printf "]"
-
-let p_all ll =
-    printf "{";
-    List.iter (fun e -> p_label e) ll;
-    printf "}\n"
-
+(* Checks the domination of v1 on v2 in case of a minimization *)
 let (<~) v1 v2 =
     let l1, l2 = (Array.to_list v1), (Array.to_list v2) in
     (List.for_all2 (fun a b -> a <= b) l1 l2)
@@ -88,32 +84,54 @@ let martins start =
         if PQ.is_empty q then dist
         else
             let (u, d) = PQ.pop_maximum q in
-                let x,y = (G.V.label u) in
-                printf "Entering %d %d: " x y;
-                p_label d;
-                G.iter_succ_e
-                (fun e -> let ev = G.E.dst e in
-                    let succ_w = v_add d (G.E.label e) in
-                    let succ_labels = try H.find dist ev with Not_found -> [] in
-                    let succ_filtered = domination_filter succ_w succ_labels in
-                    let improvement = not (is_dominated succ_w succ_labels) in
-                    if improvement then begin
-                        H.replace dist ev (succ_w::succ_filtered);
-                        PQ.add q (ev, succ_w)
-                    end
+            G.iter_succ_e
+            (fun e -> let ev = G.E.dst e in
+            let succ_w = v_add d (G.E.label e) in
+            let succ_labels = try H.find dist ev with Not_found -> [] in
+            let succ_filtered = domination_filter succ_w succ_labels in
+            let improvement = not (is_dominated succ_w succ_labels) in
+            if improvement then begin
+                H.replace dist ev (succ_w::succ_filtered);
+                PQ.add q (ev, succ_w)
+            end;
                 )
-                graph u;
-                printf "\n";
+            graph u;
             loop () in
     PQ.add q (start, Array.make nb_dimension 0.);
     H.add dist start [Array.make nb_dimension 0.];
     loop ()
 
-let res = martins vert.(0).(0)
+let front = H.find (martins vert.(0).(0)) vert.(9).(9)
 
-let nb_paths = H.fold (fun k v r -> (List.length v) + r) res 0
+let x_min, x_max, y_min, y_max = List.fold_right
+(fun e (x_min, x_max, y_min, y_max) -> 
+ (min e.(0) x_min), (max e.(0) x_max), (min e.(1) y_min), (max e.(1) y_max))
+front (infinity, 0., infinity, 0.) 
 
-    
-let _ = printf "coucou\n";
-printf "Graph size: nodes=%d, edges=%d, paths=%d\n"
-(G.nb_vertex graph) (G.nb_edges graph) nb_paths;
+let x_scale = ( 800. /. (x_max -. x_min) )
+let y_scale = ( 800. /. (y_max -. y_min) )
+
+open Graphics
+let () = open_graph " 800x800"
+
+let draw_graph () = 
+  clear_graph ();
+  set_color red;
+  set_line_width 1;
+  List.iter (fun e -> draw_circle (truncate ( x_scale *. ( e.(0) -. x_min) ))
+  (truncate ( y_scale *. ( e.(1) -. y_min)) ) 3 )
+   front
+
+
+let _ =
+  try
+    let () = draw_graph () in
+    while true do
+      let st = Graphics.wait_next_event [ Key_pressed ] in
+      if st.keypressed then match st.key with
+      | 'q' -> raise Exit
+      | _ -> ()
+    done
+  with Exit ->
+    close_graph ()
+
